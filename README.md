@@ -1,2 +1,3 @@
-# Simple-Rust-Unix-Socket
-Simple Rust project to test Unix Socket
+# UnixSocket-Rust
+
+Test project to learn how the Unix Socket works in Rust.

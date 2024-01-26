@@ -1,4 +1,6 @@
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::os::linux::raw::stat;
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{UnixListener, UnixStream};
@@ -23,12 +25,17 @@ enum Subscription {
     Window,
     AudioSinkVolume,
     AudioSourceVolume,
-    Invalid,
+}
+
+#[derive(Serialize, Deserialize)]
+struct SubscriptionInfo {
+    pid: u32,
+    name: String,
 }
 
 struct HyprvisorState {
     data: HyprvisorData,
-    subscribers: HashMap<Subscription, Vec<UnixStream>>,
+    subscribers: HashMap<Subscription, HashMap<u32, UnixStream>>,
 }
 
 #[tokio::main]
@@ -74,31 +81,60 @@ async fn main() {
 }
 
 async fn handle_new_connection(mut stream: UnixStream, server_state: Arc<Mutex<HyprvisorState>>) {
-    let mut buffer = [0; 1];
-    if let Ok(_) = stream.read_exact(&mut buffer).await {
-        let subscription = match buffer[0] {
-            1 => Subscription::Workspace,
-            // 2 => Subscription::Window,
-            // 3 => Subscription::AudioSinkVolume,
-            // 4 => Subscription::AudioSourceVolume,
-            _ => {
-                eprint!("Invalid subscription type...");
-                return;
-            }
-        };
+    let mut buffer = [0; 1024];
+    let bytes_received = match stream.try_read(&mut buffer) {
+        Ok(message_len) => message_len,
+        Err(e) => {
+            eprintln!("Failed to read data from client. | Error: {}", e);
+            return;
+        }
+    };
 
-        let mut state = server_state.lock().await;
-        state.subscribers.entry(subscription).or_insert(Vec::new());
+    if bytes_received < 2 {
+        eprintln!("Invalid message.");
+        return;
+    }
 
-        println!("New subscriber with ID: {}", buffer[0]);
+    let subscription_info: Result<SubscriptionInfo, serde_json::Error> =
+        serde_json::from_slice(&buffer[0..bytes_received].to_vec());
 
-        let response_message = "I got u, bae";
-        stream.write_all(response_message.as_bytes()).await.unwrap();
+    match subscription_info {
+        Ok(info) => {
+            let subscription_id = match info.name.as_str() {
+                "workspace" => Subscription::Workspace,
+                "window" => Subscription::Window,
+                "sink_volume" => Subscription::AudioSinkVolume,
+                "source_volume" => Subscription::AudioSourceVolume,
+                _ => {
+                    eprintln!("Invalid subscription");
+                    return;
+                }
+            };
 
-        state
-            .subscribers
-            .get_mut(&subscription)
-            .unwrap()
-            .push(stream);
+            let mut state = server_state.lock().await;
+            state
+                .subscribers
+                .entry(subscription_id)
+                .or_insert(HashMap::new());
+
+            println!(
+                "New client with PID {} subscribed to {}",
+                info.pid, info.name
+            );
+
+            let response_message = "Server reply: Connected.";
+            stream.write_all(response_message.as_bytes()).await.unwrap();
+
+            state
+                .subscribers
+                .get_mut(&subscription_id)
+                .unwrap()
+                .insert(info.pid, stream);
+        }
+
+        Err(e) => {
+            eprintln!("Failed to parse subscription message. | Error: {}", e);
+            return;
+        }
     }
 }

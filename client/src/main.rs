@@ -1,28 +1,60 @@
+use serde::{Deserialize, Serialize};
+use serde_json::Error;
+use std::{env, process};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::UnixStream;
 
+#[derive(Serialize, Deserialize)]
+struct SubscriptionInfo {
+    pid: u32,
+    name: String,
+}
+
 #[tokio::main]
 async fn main() {
-    let socket_path = "/tmp/hyprvisor.sock";
+    // Get subscription id from arguments
+    let args: Vec<String> = env::args().collect();
+    if args.len() != 2 {
+        eprintln!("Usage: {} <subscription_id>", args[0]);
+        return;
+    }
+
+    let client_pid: u32 = process::id();
+    let subscription_name: String = match validate_subscription_id(&args[1]) {
+        Some(id) => id,
+        None => {
+            eprintln!("Error: Invalid sunscription id!");
+            eprintln!("Allow IDs: workspace, window, sink_volume, source_volume");
+            return;
+        }
+    };
+
+    let subscription_message = match prepare_subscription_message(client_pid, subscription_name) {
+        Ok(msg) => msg,
+        Err(e) => {
+            eprintln!("Failed to construct subscription message | Error: {}", e);
+            return;
+        }
+    };
 
     // Connect to the Unix socket
-    let mut stream = match UnixStream::connect(socket_path).await {
+    const SOCKET_PATH: &str = "/tmp/hyprvisor.sock";
+    let mut stream = match UnixStream::connect(SOCKET_PATH).await {
         Ok(stream) => stream,
         Err(e) => {
             eprintln!(
                 "Failed to connect to Unix socket: {} | Error: {}",
-                socket_path, e
+                SOCKET_PATH, e
             );
             return;
         }
     };
 
-    // Subscribe to Workspace updates (change the number accordingly based on your protocol)
-    let subscription_type = 1;
     stream
-        .write_all(&[subscription_type])
+        .write_all(subscription_message.as_bytes())
         .await
         .expect("Failed to write subscription type");
+    println!("Send: {}", subscription_message);
 
     // Continuously listen for responses from the server
     loop {
@@ -42,7 +74,28 @@ async fn main() {
 
         let response_message = String::from_utf8_lossy(&response_buffer[..bytes_received]);
         println!("Received from server: {}", response_message);
-
-        // Add your logic to process the received message from the server
     }
+}
+
+fn validate_subscription_id(id: &String) -> Option<String> {
+    let allow_id: Vec<String> = vec![
+        "workspace".to_string(),
+        "window".to_string(),
+        "sink_volume".to_string(),
+        "source_volume".to_string(),
+    ];
+
+    if allow_id.contains(id) {
+        Some(id.clone())
+    } else {
+        None
+    }
+}
+
+fn prepare_subscription_message(pid: u32, name: String) -> Result<String, Error> {
+    let subscription_info = SubscriptionInfo {
+        pid,
+        name,
+    };
+    serde_json::to_string(&subscription_info)
 }
