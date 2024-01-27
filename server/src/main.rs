@@ -1,8 +1,8 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::os::linux::raw::stat;
+use std::fs;
 use std::sync::Arc;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::AsyncWriteExt;
 use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::Mutex;
 
@@ -41,6 +41,9 @@ struct HyprvisorState {
 #[tokio::main]
 async fn main() {
     let socket_path = "/tmp/hyprvisor.sock";
+
+    // Try remove old socket first
+    let _ = fs::remove_file(socket_path);
 
     let listener = match UnixListener::bind(socket_path) {
         Ok(unix_listener) => unix_listener,
@@ -122,7 +125,7 @@ async fn handle_new_connection(mut stream: UnixStream, server_state: Arc<Mutex<H
                 info.pid, info.name
             );
 
-            let response_message = "Server reply: Connected.";
+            let response_message = "From server with love";
             stream.write_all(response_message.as_bytes()).await.unwrap();
 
             state
