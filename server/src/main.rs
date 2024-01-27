@@ -1,8 +1,12 @@
 mod hyprvisor;
+mod protocols;
+mod server;
 
-use hyprvisor::run_server;
+use server::Server;
 
 #[tokio::main]
 async fn main() {
-    run_server().await;
+    let mut server = Server::new("/tmp/hyprvisor.sock".to_string()).await;
+    server.prepare().await;
+    server.start().await;
 }
