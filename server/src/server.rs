@@ -7,8 +7,8 @@ use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::Mutex;
 use tokio::time::sleep;
 
-use crate::hyprvisor::state::HyprvisorState;
-use crate::protocols::subscription::{SubscriptionID, SubscriptionInfo};
+use crate::hyprvisor::HyprvisorState;
+use crate::protocols::{SubscriptionID, SubscriptionInfo};
 
 pub struct Server {
     socket: String,
