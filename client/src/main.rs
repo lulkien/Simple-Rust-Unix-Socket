@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Error;
-use std::{env, process};
+use std::ops::Add;
+use std::{env, fs, process};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::UnixStream;
 
@@ -38,13 +39,20 @@ async fn main() {
     };
 
     // Connect to the Unix socket
-    const SOCKET_PATH: &str = "/tmp/hyprvisor.sock";
-    let mut stream = match UnixStream::connect(SOCKET_PATH).await {
+    let socket_path: String = match find_socket_path() {
+        Some(path) => path,
+        None => {
+            eprintln!("Socket not found...");
+            return;
+        }
+    };
+
+    let mut stream = match UnixStream::connect(&socket_path).await {
         Ok(stream) => stream,
         Err(e) => {
             eprintln!(
                 "Failed to connect to Unix socket: {} | Error: {}",
-                SOCKET_PATH, e
+                socket_path, e
             );
             return;
         }
@@ -87,6 +95,19 @@ fn validate_subscription_id(id: &String) -> Option<String> {
 
     if allow_id.contains(id) {
         Some(id.clone())
+    } else {
+        None
+    }
+}
+
+fn find_socket_path() -> Option<String> {
+    let socket_path: String = match env::var("XDG_RUNTIME_DIR") {
+        Ok(value) => value.add("/hyprvisor.sock"),
+        Err(_) => "/tmp/hyprvisor.sock".to_string(),
+    };
+
+    if fs::metadata(&socket_path).is_ok() {
+        Some(socket_path)
     } else {
         None
     }
