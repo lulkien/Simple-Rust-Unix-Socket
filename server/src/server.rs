@@ -1,9 +1,11 @@
 use std::collections::HashMap;
 use std::fs;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::io::AsyncWriteExt;
 use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::Mutex;
+use tokio::time::sleep;
 
 use crate::hyprvisor::state::HyprvisorState;
 use crate::protocols::subscription::{SubscriptionID, SubscriptionInfo};
@@ -25,6 +27,7 @@ impl Server {
 
     pub async fn prepare(&mut self) {
         if fs::metadata(&self.socket).is_err() {
+            println!("No running server binded on socket {}", self.socket);
             self.is_ready = Some(true);
             return;
         };
@@ -77,6 +80,10 @@ impl Server {
             self.socket
         );
 
+        let broadcast_state_ref = Arc::clone(&self.state);
+        tokio::spawn(broadcast_data(broadcast_state_ref));
+
+        // Main loop
         while let Ok((stream, _)) = listener.accept().await {
             let state_ref = Arc::clone(&self.state);
             tokio::spawn(handle_new_connection(stream, state_ref));
@@ -127,7 +134,7 @@ async fn handle_new_connection(mut stream: UnixStream, state: Arc<Mutex<Hyprviso
                 info.pid, info.name
             );
 
-            let response_message = "From server with love";
+            let response_message = "From server with love".to_string();
             stream.write_all(response_message.as_bytes()).await.unwrap();
 
             state
@@ -141,5 +148,39 @@ async fn handle_new_connection(mut stream: UnixStream, state: Arc<Mutex<Hyprviso
             eprintln!("Failed to parse subscription message. | Error: {}", e);
             return;
         }
+    }
+}
+
+async fn broadcast_data(server_state: Arc<Mutex<HyprvisorState>>) {
+    loop {
+        println!("Send message to client");
+        {
+            // Lock server state
+            let mut state = server_state.lock().await;
+
+            for (_, subscribers) in state.subscribers.iter_mut() {
+                let mut disconnected_pid: Vec<u32> = Vec::new();
+                for (pid, stream) in subscribers.iter_mut() {
+                    let msg = "Test connection".to_string();
+                    match stream.write_all(msg.as_bytes()).await {
+                        Ok(_) => {
+                            println!("Client {} is alive.", pid);
+                        }
+                        Err(e) => {
+                            println!("Client {} is no longer alive. Error: {}", pid, e);
+                            disconnected_pid.push(pid.clone());
+                        }
+                    }
+                }
+
+                // Remove disconnected_pid
+                for pid in disconnected_pid {
+                    subscribers.remove(&pid);
+                }
+            }
+            // Release server state
+        }
+
+        sleep(Duration::from_secs(2)).await;
     }
 }

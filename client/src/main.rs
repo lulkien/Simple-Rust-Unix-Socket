@@ -54,11 +54,11 @@ async fn main() {
         .write_all(subscription_message.as_bytes())
         .await
         .expect("Failed to write subscription type");
-    println!("Send: {}", subscription_message);
+    // println!("Send: {}", subscription_message);
 
     // Continuously listen for responses from the server
     loop {
-        let mut response_buffer = [0; 256]; // Adjust the buffer size based on your expected message size
+        let mut response_buffer: [u8; 1024] = [0; 1024]; // Adjust the buffer size based on your expected message size
         let bytes_received = match stream.read(&mut response_buffer).await {
             Ok(bytes) => bytes,
             Err(e) => {
@@ -73,7 +73,7 @@ async fn main() {
         }
 
         let response_message = String::from_utf8_lossy(&response_buffer[..bytes_received]);
-        println!("Received from server: {}", response_message);
+        println!("{}", response_message);
     }
 }
 
@@ -93,9 +93,6 @@ fn validate_subscription_id(id: &String) -> Option<String> {
 }
 
 fn prepare_subscription_message(pid: u32, name: String) -> Result<String, Error> {
-    let subscription_info = SubscriptionInfo {
-        pid,
-        name,
-    };
+    let subscription_info = SubscriptionInfo { pid, name };
     serde_json::to_string(&subscription_info)
 }
